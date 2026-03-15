@@ -1,0 +1,13 @@
+.DS_Store
+__pycache__/
+*.pyc
+bin/
+.metadata/
+*.zip
+# Eclipse project metadata
+.classpath
+.project
+.settings/
+# Cranfield IR test dataset (large, not original work)
+**/Docs/
+cran-1-1.all.1400
