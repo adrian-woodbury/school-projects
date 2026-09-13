@@ -1,6 +1,7 @@
-import React, { useState } from "react";
-import { ScrollView, StyleSheet, Text, View, TouchableOpacity, StatusBar, Modal, Pressable } from "react-native";
-import { mockShoes } from "../data/mockShoes";
+import React, { useState, useEffect } from "react";
+import { ScrollView, StyleSheet, Text, View, TouchableOpacity, StatusBar, ActivityIndicator } from "react-native";
+import { initDatabase, getAllShoes, getStats } from "../data/database";
+import { Shoe } from "../types/Shoe";
 import StatCard from "../components/StatCard";
 import CategoryChart from "../components/CategoryChart";
 import SalesChart from "../components/SalesChart";
@@ -11,44 +12,76 @@ import ProductModal from "../components/ProductModal";
 import AllProductsModal from "../components/AllProductsModal";
 
 export default function HomeScreen() {
-  const [selectedShoe, setSelectedShoe] = useState(mockShoes[0]);
+  const [shoes, setShoes] = useState<Shoe[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedShoe, setSelectedShoe] = useState<Shoe | null>(null);
   const [timeRange, setTimeRange] = useState<"week" | "month" | "year">("month");
   const [showProductModal, setShowProductModal] = useState(false);
   const [showAllProducts, setShowAllProducts] = useState(false);
   const [activeCard, setActiveCard] = useState<string | null>(null);
 
-  const totalStock = mockShoes.reduce((sum, shoe) => sum + shoe.stock, 0);
-  const avgRating = (mockShoes.reduce((sum, shoe) => sum + shoe.rating, 0) / mockShoes.length).toFixed(1);
+  // Initialize database and load data
+  useEffect(() => {
+    async function loadData() {
+      try {
+        await initDatabase();
+        const shoesData = await getAllShoes();
+        setShoes(shoesData);
+        if (shoesData.length > 0) {
+          setSelectedShoe(shoesData[0]);
+        }
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+  }, []);
+
+  // Show loading state
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#1a1a2e" />
+        <Text style={styles.loadingText}>Loading inventory data...</Text>
+      </View>
+    );
+  }
+
+  const totalStock = shoes.reduce((sum, shoe) => sum + shoe.stock, 0);
+  const avgRating = shoes.length > 0 
+    ? (shoes.reduce((sum, shoe) => sum + shoe.rating, 0) / shoes.length).toFixed(1)
+    : "0.0";
 
   // Calculate stats based on time range
   const getTimeRangeData = () => {
     switch (timeRange) {
       case "week":
-        // Last week = ~25% of last month
-        const weekSales = mockShoes.reduce((sum, s) => sum + Math.round(s.monthlySales[11] * 0.25), 0);
-        const prevWeekSales = mockShoes.reduce((sum, s) => sum + Math.round(s.monthlySales[11] * 0.22), 0);
-        const weekRevenue = mockShoes.reduce((sum, s) => sum + s.price * Math.round(s.monthlySales[11] * 0.25), 0);
+        const weekSales = shoes.reduce((sum, s) => sum + Math.round((s.monthlySales?.[11] || 0) * 0.25), 0);
+        const prevWeekSales = shoes.reduce((sum, s) => sum + Math.round((s.monthlySales?.[11] || 0) * 0.22), 0);
+        const weekRevenue = shoes.reduce((sum, s) => sum + s.price * Math.round((s.monthlySales?.[11] || 0) * 0.25), 0);
         return {
           sales: weekSales,
           revenue: weekRevenue,
-          trend: ((weekSales - prevWeekSales) / prevWeekSales * 100).toFixed(1),
+          trend: prevWeekSales > 0 ? ((weekSales - prevWeekSales) / prevWeekSales * 100).toFixed(1) : "0",
           unitsTrend: "+8.2%",
           stockTrend: "-1.2%",
         };
       case "month":
-        const monthSales = mockShoes.reduce((sum, s) => sum + s.monthlySales[11], 0);
-        const prevMonthSales = mockShoes.reduce((sum, s) => sum + s.monthlySales[10], 0);
-        const monthRevenue = mockShoes.reduce((sum, s) => sum + s.price * s.monthlySales[11], 0);
+        const monthSales = shoes.reduce((sum, s) => sum + (s.monthlySales?.[11] || 0), 0);
+        const prevMonthSales = shoes.reduce((sum, s) => sum + (s.monthlySales?.[10] || 0), 0);
+        const monthRevenue = shoes.reduce((sum, s) => sum + s.price * (s.monthlySales?.[11] || 0), 0);
         return {
           sales: monthSales,
           revenue: monthRevenue,
-          trend: ((monthSales - prevMonthSales) / prevMonthSales * 100).toFixed(1),
+          trend: prevMonthSales > 0 ? ((monthSales - prevMonthSales) / prevMonthSales * 100).toFixed(1) : "0",
           unitsTrend: "+12.3%",
           stockTrend: "-5.2%",
         };
       case "year":
-        const yearSales = mockShoes.reduce((sum, s) => sum + s.salesCount, 0);
-        const yearRevenue = mockShoes.reduce((sum, s) => sum + s.price * s.salesCount, 0);
+        const yearSales = shoes.reduce((sum, s) => sum + s.salesCount, 0);
+        const yearRevenue = shoes.reduce((sum, s) => sum + s.price * s.salesCount, 0);
         return {
           sales: yearSales,
           revenue: yearRevenue,
@@ -63,7 +96,7 @@ export default function HomeScreen() {
 
   const rangeData = getTimeRangeData();
 
-  const handleProductSelect = (shoe: typeof mockShoes[0]) => {
+  const handleProductSelect = (shoe: Shoe) => {
     setSelectedShoe(shoe);
     setShowProductModal(true);
   };
@@ -80,11 +113,17 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Good morning</Text>
-            <Text style={styles.title}>InfoDash</Text>
+            <Text style={styles.title}>SoleMetrics</Text>
           </View>
           <TouchableOpacity style={styles.avatar} activeOpacity={0.7}>
             <Text style={styles.avatarText}>AW</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Database Status */}
+        <View style={styles.dbStatus}>
+          <View style={styles.dbDot} />
+          <Text style={styles.dbText}>SQLite Connected • {shoes.length} products loaded</Text>
         </View>
 
         {/* Time Range Filter */}
@@ -142,18 +181,18 @@ export default function HomeScreen() {
               <Text style={styles.seeAllText}>See Details →</Text>
             </TouchableOpacity>
           </View>
-          <SalesChart shoe={selectedShoe} allShoes={mockShoes} />
+          {selectedShoe && <SalesChart shoe={selectedShoe} allShoes={shoes} />}
         </View>
 
         {/* Charts Row */}
         <View style={styles.chartsRow}>
           <TouchableOpacity style={[styles.card, styles.halfCard]} activeOpacity={0.8}>
             <Text style={styles.cardTitle}>By Category</Text>
-            <CategoryChart shoes={mockShoes} />
+            <CategoryChart shoes={shoes} />
           </TouchableOpacity>
           <TouchableOpacity style={[styles.card, styles.halfCard]} activeOpacity={0.8}>
             <Text style={styles.cardTitle}>By Brand</Text>
-            <BrandChart shoes={mockShoes} />
+            <BrandChart shoes={shoes} />
           </TouchableOpacity>
         </View>
 
@@ -170,7 +209,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
           <TopProducts 
-            shoes={mockShoes} 
+            shoes={shoes} 
             onSelect={handleProductSelect} 
             selected={selectedShoe} 
           />
@@ -188,8 +227,9 @@ export default function HomeScreen() {
               <Text style={styles.seeAllText}>Manage →</Text>
             </TouchableOpacity>
           </View>
-          {mockShoes.map(shoe => {
+          {shoes.map(shoe => {
             const stockLevel = shoe.stock < 30 ? "low" : shoe.stock < 60 ? "medium" : "high";
+            const primaryColor = shoe.colors?.[0] || "Black";
             return (
               <TouchableOpacity 
                 style={styles.inventoryRow} 
@@ -197,13 +237,13 @@ export default function HomeScreen() {
                 onPress={() => handleProductSelect(shoe)}
                 activeOpacity={0.6}
               >
-                <View style={[styles.colorDot, { backgroundColor: getColorHex(shoe.color) }]} />
+                <View style={[styles.colorDot, { backgroundColor: getColorHex(primaryColor) }]} />
                 <View style={styles.inventoryInfo}>
                   <Text style={styles.inventoryName}>{shoe.name}</Text>
                   <Text style={styles.inventoryMeta}>{shoe.brand} · ${shoe.price}</Text>
                 </View>
                 <View style={styles.stockBadge}>
-                  <View style={[styles.stockIndicator, styles[`stock_${stockLevel}`]]} />
+                  <View style={[styles.stockIndicator, styles[`stock_${stockLevel}` as keyof typeof styles]]} />
                   <Text style={styles.stockText}>{shoe.stock}</Text>
                 </View>
               </TouchableOpacity>
@@ -215,16 +255,18 @@ export default function HomeScreen() {
       </ScrollView>
 
       {/* Product Detail Modal */}
-      <ProductModal 
-        visible={showProductModal}
-        shoe={selectedShoe}
-        onClose={() => setShowProductModal(false)}
-      />
+      {selectedShoe && (
+        <ProductModal 
+          visible={showProductModal}
+          shoe={selectedShoe}
+          onClose={() => setShowProductModal(false)}
+        />
+      )}
 
       {/* All Products Modal */}
       <AllProductsModal
         visible={showAllProducts}
-        shoes={mockShoes}
+        shoes={shoes}
         onClose={() => setShowAllProducts(false)}
         onSelect={(shoe) => {
           setSelectedShoe(shoe);
@@ -243,6 +285,11 @@ function getColorHex(color: string): string {
     Bone: "#e8dcc8",
     Red: "#e74c3c",
     Blue: "#3498db",
+    Brown: "#8B4513",
+    Grey: "#888",
+    Navy: "#001f3f",
+    Green: "#27ae60",
+    Mint: "#98FF98",
   };
   return colors[color] || "#999";
 }
@@ -252,11 +299,23 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: { padding: 20, paddingTop: 60 },
   
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f8f9fc",
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: "#666",
+  },
+  
   header: { 
     flexDirection: "row", 
     justifyContent: "space-between", 
     alignItems: "center",
-    marginBottom: 24,
+    marginBottom: 12,
   },
   greeting: { fontSize: 14, color: "#666", marginBottom: 4 },
   title: { fontSize: 28, fontWeight: "800", color: "#1a1a2e" },
@@ -269,6 +328,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+
+  dbStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#e8f5e9",
+    borderRadius: 8,
+  },
+  dbDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#27ae60",
+    marginRight: 8,
+  },
+  dbText: {
+    fontSize: 12,
+    color: "#2e7d32",
+    fontWeight: "500",
+  },
 
   statsGrid: { 
     flexDirection: "row", 
